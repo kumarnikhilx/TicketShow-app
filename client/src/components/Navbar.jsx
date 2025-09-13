@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { MenuIcon, SearchIcon, TicketPlus, XIcon } from "lucide-react";
 import { useClerk, UserButton, useUser } from "@clerk/clerk-react";
 import { useAppContext } from "../context/Appcontext";
@@ -10,6 +10,15 @@ const Navbar = () => {
   const { user } = useUser();
   const { openSignIn } = useClerk();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Function to decide if the link is active
+  const getLinkClass = (path) => {
+    return location.pathname === path
+      ? "text-purple-600 hover:text-purple-700 transition-colors"
+      : "text-white hover:text-primary transition-colors";
+  };
+
   return (
     <div className="fixed top-0 left-0 z-50 w-full flex items-center justify-between px-6 md:px-8 lg:px-16 py-5">
       <Link
@@ -38,7 +47,7 @@ const Navbar = () => {
             scrollTo(0, 0);
             setisOpen(false);
           }}
-          className="hover:text-primary"
+          className={getLinkClass("/")}
         >
           Home
         </Link>
@@ -48,7 +57,7 @@ const Navbar = () => {
             scrollTo(0, 0);
             setisOpen(false);
           }}
-          className="hover:text-primary"
+          className={getLinkClass("/movies")}
         >
           Movies
         </Link>
@@ -59,7 +68,7 @@ const Navbar = () => {
               scrollTo(0, 0);
               setisOpen(false);
             }}
-            className="hover:text-primary"
+            className={getLinkClass("/favourites")}
           >
             Favourite
           </Link>
@@ -70,7 +79,7 @@ const Navbar = () => {
             scrollTo(0, 0);
             setisOpen(false);
           }}
-          className="hover:text-primary"
+          className={getLinkClass("/my-bookings")}
         >
           Bookings
         </Link>
@@ -80,7 +89,7 @@ const Navbar = () => {
             scrollTo(0, 0);
             setisOpen(false);
           }}
-          className="text-primary"
+          className={getLinkClass("/admin")}
         >
           Dashboard
         </Link>
