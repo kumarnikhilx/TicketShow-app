@@ -42,7 +42,7 @@ const Footer = () => {
       </div>
 
       <p className="text-center sm:text-sm max-md:text-xs py-4 text-gray-400">
-        © {new Date().getFullYear()} QuickShow. All Rights Reserved.
+        © {new Date().getFullYear()} TicketShow. All Rights Reserved.
       </p>
     </>
   );

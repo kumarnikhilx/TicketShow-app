@@ -53,7 +53,7 @@ export const createBooking = async (req, res) => {
     const stripeInstance = new Stripe(`${process.env.STRIPE_SECRET_KEY}`);
     const conversionRate = 86;
     const inrAmount = booking.amount;
-    const usdAmount = inrAmount / conversionRate;
+    const usdAmount = (inrAmount / conversionRate);
     const unitAmountInCents = Math.floor(usdAmount * 100);
 
     const line_items = [
@@ -63,7 +63,7 @@ export const createBooking = async (req, res) => {
           product_data: {
             name: show.movie.originalTitle,
           },
-          unit_amount: unitAmountInCents,
+          unit_amount: booking.amount*100,
         },
         quantity: 1,
       },
@@ -86,7 +86,8 @@ export const createBooking = async (req, res) => {
       data: {
         bookingId: booking._id.toString(),
       },
-      expires_at: Math.floor(Date.now() / 1000) + 30 * 60, // 30 minutes
+      // expires_at: Math.floor(Date.now() / 1000) + 30 * 60, // 30 minutes
+      expires_at: Math.floor(Date.now() / 1000) + 60,
     });
 
     res.json({ success: true, url: session.url });
