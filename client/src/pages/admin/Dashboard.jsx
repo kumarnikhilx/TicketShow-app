@@ -84,6 +84,7 @@ const Dashboard = () => {
       <div className='relative'>
         <BlurCircle top='0' left='0' />
       </div>
+     
       <div className='grid grid-cols-2 min-lg:grid-cols-4 gap-6 max-md:gap-1 mt-8 max-md:pl-5 max-sm:pl-0'>
         {dashboardCards.map((data, index) => {
           return (<div key={index} className='flex justify-between rounded-lg bg-primary/10 border-2 border-primary/20'>
