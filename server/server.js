@@ -10,7 +10,7 @@ import bookingRouter from './Routes/bookingrouter.js';
 import adminRouter from './Routes/adminrouter.js';
 import userRouter from './Routes/userrouter.js';
 import { stripeWebhooks } from './Control/Stripewebhooks.js';
-import sendEmail from './config/sendEmail.js';
+
 
 const app = express();
 const port = 3000;
@@ -31,15 +31,6 @@ app.use("/api/booking", bookingRouter);
 app.use("/api/admin", adminRouter);
 app.use('/api/user', userRouter);
 
-app.get("/test-email", async (req, res) => {
-  await sendEmail({
-    to: "kumarnikhlx007@gmail.com",
-    subject: "Brevo SMTP Test Successful!",
-    body: "<h1>Email is working 🎉</h1>"
-  });
-
-  res.send("Email sent!");
-});
 
 
 // Listen at port : 3000
