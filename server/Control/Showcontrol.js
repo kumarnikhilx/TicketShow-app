@@ -87,33 +87,87 @@ export const addshow = async (req, res) => {
 // Get all unique movies from database
 export const getmovies = async (req, res) => {
   try {
-    const shows = await Show.find({ showDateTime: { $gte: new Date() } }).populate('movie').sort({ showDateTime: 1 });
-    const uniqueshows = new Set(shows.map((show) => show.movie));
+    const shows = await Show.find({
+      showDateTime: { $gte: new Date() }
+    })
+      .populate("movie")
+      .sort({ showDateTime: 1 });
 
-    res.json({ success: true, shows: Array.from(uniqueshows) });
+    const movieMap = new Map();
+
+    shows.forEach((show) => {
+      const movie = show.movie;
+      if (!movie) return;
+
+      const movieId = movie._id.toString();
+      const currentPrice = show.showprice ?? null;
+
+      if (!movieMap.has(movieId)) {
+        const movieObj = movie.toObject();
+        movieObj.price = currentPrice;   // 🎉 ADD PRICE
+        movieMap.set(movieId, movieObj);
+      } else {
+        const existing = movieMap.get(movieId);
+        if (
+          currentPrice !== null &&
+          (existing.price === null || currentPrice < existing.price)
+        ) {
+          existing.price = currentPrice; // 🎉 KEEP MINIMUM PRICE
+        }
+      }
+    });
+
+    res.json({ success: true, shows: Array.from(movieMap.values()) });
   } catch (error) {
     res.json({ success: false, message: error.message });
   }
-}
+};
+
 
 // Get Single movie from database
 export const getmovie = async (req, res) => {
   try {
     const { movieId } = req.params;
-    const shows = await Show.find({ movie: movieId, showDateTime: { $gte: new Date() } });
+
+    const shows = await Show.find({
+      movie: movieId,
+      showDateTime: { $gte: new Date() }
+    });
+
     const movie = await Movie.findById(movieId);
+    if (!movie) {
+      return res.json({ success: false, message: "Movie not found" });
+    }
+
     const datetime = {};
+    let minPrice = null;
 
     shows.forEach((show) => {
       const date = show.showDateTime.toISOString().split('T')[0];
-      if (!datetime[date]) {
-        datetime[date] = [];
+      if (!datetime[date]) datetime[date] = [];
+
+      // Keep track of minimum ticket price
+      if (minPrice === null || show.showprice < minPrice) {
+        minPrice = show.showprice;
       }
-      datetime[date].push({ time: show.showDateTime, showId: show._id })
-    })
-    res.json({ success: true, movie, datetime })
+
+      datetime[date].push({
+        time: show.showDateTime,
+        showId: show._id,
+        price: show.showprice   // OPTIONAL (helps SeatLayout)
+      });
+    });
+
+    res.json({
+      success: true,
+      movie,
+      datetime,
+      price: minPrice   // 🎉 ADDED HERE
+    });
+
   } catch (error) {
     res.json({ success: false, message: error.message });
   }
-}
+};
+
 
