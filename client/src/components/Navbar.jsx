@@ -7,17 +7,30 @@ import { useAppContext } from "../context/Appcontext";
 const Navbar = () => {
   const { favorites, shows } = useAppContext();
   console.log("shows:", shows);
+  
+  const { user, isLoaded } = useUser();
 
   const [isOpen, setisOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const { user } = useUser();
+  // const { user } = useUser();
   const { openSignIn } = useClerk();
   const navigate = useNavigate();
   const location = useLocation();
 
   const searchRef = useRef();
+//  const { user, isLoaded } = useUser();
 
+const isAdmin = isLoaded && user?.publicMetadata?.role === "admin";
+
+
+ useEffect(() => {
+ if (isLoaded) {
+   console.log("CLERK USER:", user);
+   console.log("PUBLIC META:", user?.publicMetadata);
+   console.log("PRIVATE META:", user?.privateMetadata);
+ }
+}, [isLoaded, user]);
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (searchRef.current && !searchRef.current.contains(event.target)) {
@@ -120,16 +133,18 @@ const Navbar = () => {
         >
           Bookings
         </Link>
-        <Link
-          to="/admin"
-          onClick={() => {
-            scrollTo(0, 0);
-            setisOpen(false);
-          }}
-          className={getLinkClass("/admin")}
-        >
-          Dashboard
-        </Link>
+        {isAdmin && (
+          <Link
+            to="/admin"
+            onClick={() => {
+              scrollTo(0, 0);
+              setisOpen(false);
+            }}
+            className={getLinkClass("/admin")}
+          >
+            Dashboard
+          </Link>
+        )}
       </div>
 
       {/* Search and User Controls */}
