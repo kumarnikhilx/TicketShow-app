@@ -9,14 +9,14 @@ import showRouter from './Routes/showrouter.js';
 import bookingRouter from './Routes/bookingrouter.js';
 import adminRouter from './Routes/adminrouter.js';
 import userRouter from './Routes/userrouter.js';
-import { stripeWebhooks } from './Control/Stripewebhooks.js';
+// import { stripeWebhooks } from './Control/Stripewebhooks.js';
 
 
 const app = express();
 const port = 3000;
 await mongoConnect();
 
-app.post('/api/stripe', express.raw({type : "application/json"}), stripeWebhooks);
+// app.post('/api/stripe', express.raw({type : "application/json"}), stripeWebhooks);
 
 //Middleware 
 app.use(express.json());
