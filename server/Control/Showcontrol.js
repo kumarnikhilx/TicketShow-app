@@ -104,7 +104,8 @@ export const getmovies = async (req, res) => {
 
       if (!movieMap.has(movieId)) {
         const movieObj = movie.toObject();
-        movieObj.price = currentPrice;   // 🎉 ADD PRICE
+        movieObj.price = currentPrice;
+           
         movieMap.set(movieId, movieObj);
       } else {
         const existing = movieMap.get(movieId);

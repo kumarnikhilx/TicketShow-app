@@ -8,63 +8,33 @@ import Movie from "../models/Movie.js";
 
 export const inngest = new Inngest({ id: "movie-ticket-booking" });
 
-/* ----------------- HELPER: SAFE NAME BUILDER ----------------- */
+/* ---------------------------------------------------------
+   ⭐ Helper function: Always return clean full name
+----------------------------------------------------------- */
+function buildUserName(firstName, lastName) {
+  if (firstName && lastName) return `${firstName} ${lastName}`;
+  if (firstName && !lastName) return firstName;
+  return firstName || lastName || "User";
+}
 
-const buildSafeName = ({ firstName, lastName, username, email, fallback }) => {
-  let fullName = `${firstName || ""} ${lastName || ""}`.trim();
-
-  if (
-    !fullName ||
-    fullName.toLowerCase() === "null null" ||
-    fullName.toLowerCase() === "null"
-  ) {
-    fullName =
-      username ||
-      (email ? email.split("@")[0] : "") ||
-      fallback ||
-      "Movie Lover";
-  }
-
-  return fullName;
-};
-
-/* ----------------- CLERK USER SYNC FUNCTIONS ----------------- */
+/* ---------------------------------------------------------
+   CLERK USER SYNC
+----------------------------------------------------------- */
 
 const userCreated = inngest.createFunction(
   { id: "create-user" },
   { event: "clerk/user.created" },
   async ({ event }) => {
-    const {
-      id,
-      first_name,
-      last_name,
-      email_addresses,
-      image_url,
-      username,
-    } = event.data;
+    const { id, first_name, last_name, email_addresses, image_url } = event.data;
 
-    const primaryEmail = email_addresses?.[0]?.email_address;
-
-    const fullName = buildSafeName({
-      firstName: first_name,
-      lastName: last_name,
-      username,
-      email: primaryEmail,
-    });
-
-    const userdata = {
+    await User.create({
       _id: id,
-      name: fullName,
-      email: primaryEmail,
+      firstName: first_name || "",
+      lastName: last_name || "",
+      name: `${first_name || ""} ${last_name || ""}`.trim(),
+      email: email_addresses?.[0]?.email_address,
       image: image_url,
-    };
-
-    if (!userdata.email) {
-      console.warn("User created without email, clerk event:", event.data);
-      return;
-    }
-
-    await User.create(userdata);
+    });
   }
 );
 
@@ -72,32 +42,19 @@ const userUpdated = inngest.createFunction(
   { id: "update-user" },
   { event: "clerk/user.updated" },
   async ({ event }) => {
-    const {
+    const { id, first_name, last_name, email_addresses, image_url } = event.data;
+
+    await User.findByIdAndUpdate(
       id,
-      first_name,
-      last_name,
-      email_addresses,
-      image_url,
-      username,
-    } = event.data;
-
-    const primaryEmail = email_addresses?.[0]?.email_address;
-
-    const fullName = buildSafeName({
-      firstName: first_name,
-      lastName: last_name,
-      username,
-      email: primaryEmail,
-    });
-
-    const userdata = {
-      _id: id,
-      name: fullName,
-      email: primaryEmail,
-      image: image_url,
-    };
-
-    await User.findByIdAndUpdate(id, userdata, { upsert: true });
+      {
+        firstName: first_name || "",
+        lastName: last_name || "",
+        name: `${first_name || ""} ${last_name || ""}`.trim(),
+        email: email_addresses?.[0]?.email_address,
+        image: image_url,
+      },
+      { upsert: true }
+    );
   }
 );
 
@@ -105,287 +62,127 @@ const userDeleted = inngest.createFunction(
   { id: "delete-user" },
   { event: "clerk/user.deleted" },
   async ({ event }) => {
-    const { id } = event.data;
-    await User.findByIdAndDelete(id);
+    await User.findByIdAndDelete(event.data.id);
   }
 );
 
-/* --------- AUTO RELEASE SEATS + DELETE UNPAID BOOKING -------- */
+/* ---------------------------------------------------------
+   RELEASE SEATS FOR UNPAID BOOKING
+----------------------------------------------------------- */
 
 const releaseSeatsandDeletebooking = inngest.createFunction(
   { id: "release-seats-delete-booking" },
   { event: "app/checkpayment" },
   async ({ event, step }) => {
-    const tenMinutesLater = new Date(Date.now() + 10 * 60 * 1000);
+    await step.sleep("10-min-wait", "10m");
 
-    await step.sleepUntil("wait-for-10-minutes", tenMinutesLater);
+    const booking = await Booking.findById(event.data.bookingId);
+    if (!booking || booking.isPaid) return;
 
-    await step.run("check-payment-status", async () => {
-      const { bookingId } = event.data;
-      const booking = await Booking.findById(bookingId);
+    const show = await Show.findById(booking.show);
+    booking.bookedseats.forEach((seat) => delete show.occupiedSeats[seat]);
 
-      if (!booking) return;
-
-      if (!booking.isPaid) {
-        const show = await Show.findById(booking.show);
-        if (show && booking.bookedseats?.length) {
-          booking.bookedseats.forEach((seat) => {
-            delete show.occupiedSeats?.[seat];
-          });
-          show.markModified("occupiedSeats");
-          await show.save();
-        }
-        await Booking.findByIdAndDelete(booking._id);
-        console.log(`Released seats and deleted unpaid booking ${bookingId}`);
-      }
-    });
+    show.markModified("occupiedSeats");
+    await show.save();
+    await Booking.findByIdAndDelete(booking._id);
   }
 );
 
-/* ----------------- CLEANUP OLD DATA (CRON) ------------------- */
+/* ---------------------------------------------------------
+   CLEANUP OLD DATA
+----------------------------------------------------------- */
 
-export const cleanupOldData = inngest.createFunction(
+const cleanupOldData = inngest.createFunction(
   { id: "cleanup-old-bookings-shows" },
-  { cron: "0 0 1 1,7 *" }, // 00:00 on Jan 1 & Jul 1
-  async ({ step }) => {
+  { cron: "0 0 1 1,7 *" },
+  async () => {
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
-    return step.run("delete-old-bookings-and-shows", async () => {
-      const deletedBookings = await Booking.deleteMany({
-        createdAt: { $lt: sixMonthsAgo },
-      });
-
-      const deletedShows = await Show.deleteMany({
-        showDateTime: { $lt: sixMonthsAgo },
-      });
-
-      console.log(
-        `Deleted ${deletedBookings.deletedCount} old bookings and ${deletedShows.deletedCount} shows.`
-      );
-
-      return {
-        deletedBookings: deletedBookings.deletedCount,
-        deletedShows: deletedShows.deletedCount,
-      };
-    });
+    await Booking.deleteMany({ createdAt: { $lt: sixMonthsAgo } });
+    await Show.deleteMany({ showDateTime: { $lt: sixMonthsAgo } });
   }
 );
 
-/* ----------------- BOOKING CONFIRMATION EMAIL ----------------
-   Uses event.data first; falls back to DB (Booking+Show+Movie)
----------------------------------------------------------------- */
+/* ---------------------------------------------------------
+   SEND BOOKING EMAIL — firstname + lastname only
+----------------------------------------------------------- */
 
 const sendBookingEmail = inngest.createFunction(
   { id: "send-booking-confirmation-mail" },
   { event: "app/show.booked" },
   async ({ event }) => {
-    console.log("📩 [Inngest] app/show.booked received with data:", event.data);
+    console.log("📩 Booking event received:", event.data);
 
-    try {
-      let {
-        bookingId,
-        email,
-        name,
-        movieTitle,
-        primaryImage,
-        showDateTime,
-        seats,
-      } = event.data || {};
+    const {
+      bookingId,
+      email,
+      firstName,
+      lastName,
+      movieTitle,
+      primaryImage,
+      showDateTime,
+      seats,
+    } = event.data;
 
-      // ✨ FALLBACK: If anything important missing, pull from DB
-      let bookingFromDb = null;
-      if (!email || !movieTitle || !showDateTime || !Array.isArray(seats)) {
-        if (bookingId) {
-          bookingFromDb = await Booking.findById(bookingId)
-            .populate({
-              path: "show",
-              populate: { path: "movie", model: "Movie" },
-            })
-            .populate({ path: "user", select: "name email image" });
+    // ⭐ Always clean firstname + lastname
+    const userName = buildUserName(firstName, lastName);
 
-          console.log("📌 Booking fetched from DB (fallback):", {
-            exists: !!bookingFromDb,
-            hasUser: !!bookingFromDb?.user,
-            hasShow: !!bookingFromDb?.show,
-            hasMovie: !!bookingFromDb?.show?.movie,
-          });
+    // Convert time
+    let showDate = "N/A",
+      showTime = "N/A";
 
-          if (bookingFromDb) {
-            email =
-              email ||
-              bookingFromDb.email ||
-              bookingFromDb.user?.email ||
-              null;
-            if (!Array.isArray(seats) || !seats.length) {
-              seats = bookingFromDb.bookedseats || [];
-            }
-            if (!showDateTime && bookingFromDb.show?.showDateTime) {
-              showDateTime = bookingFromDb.show.showDateTime;
-            }
-            if (bookingFromDb.show?.movie) {
-              movieTitle =
-                movieTitle || bookingFromDb.show.movie.originalTitle || null;
-              primaryImage =
-                primaryImage || bookingFromDb.show.movie.primaryImage || null;
-            }
-            // name fallback from DB user
-            if (!name && bookingFromDb.user) {
-              name = bookingFromDb.user.name;
-            }
-          }
-        }
-      }
-
-      if (!email) {
-        console.warn(
-          `❌ No email resolved for booking ${bookingId} (event + DB fallback), skipping email`
-        );
-        return;
-      }
-
-      // ✨ Smart userName: avoids "NULL NULL", falls back to email username
-      let userName = buildSafeName({
-        firstName: null,
-        lastName: null,
-        username: null,
-        email,
-        fallback: name || bookingFromDb?.user?.name,
-      });
-
-      const title = movieTitle || "your movie";
-
-      let showTime = "N/A";
-      let showDate = "N/A";
-
-      if (showDateTime) {
-        const dt = new Date(showDateTime);
-        showTime = dt.toLocaleTimeString("en-US", {
-          timeZone: "Asia/Kolkata",
-        });
-        showDate = dt.toLocaleDateString("en-US", {
-          timeZone: "Asia/Kolkata",
-        });
-      }
-
-      console.log(
-        "✉️ Resolved email payload:",
-        JSON.stringify(
-          {
-            bookingId,
-            email,
-            userName,
-            title,
-            showDate,
-            showTime,
-            seats,
-          },
-          null,
-          2
-        )
-      );
-
-      await sendEmail({
-        to: email,
-        subject: `Payment confirmation: '${title}' booked!`,
-        body: `
-        <div style="max-width: 600px; margin: 0 auto; font-family: Arial, sans-serif; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-          <div style="background-color: #7b2cbf; color: white; padding: 20px; text-align: center;">
-            <h1 style="margin: 0;">🎟️ TicketShow Booking Confirmed!</h1>
-          </div>
-
-          <div style="padding: 24px; font-size: 16px; color: #333;">
-            <h2 style="margin-top: 0;">Hi ${userName},</h2>
-            <p>Your booking for <strong style="color: #7b2cbf;">"${title}"</strong> is confirmed.</p>
-
-            <p>
-              <strong>Date:</strong> ${showDate}<br>
-              <strong>Time:</strong> ${showTime}
-            </p>
-            <p><strong>Booking ID:</strong> <span style="color: #7b2cbf;">${bookingId}</span></p>
-            <p><strong>Seats:</strong> ${
-              Array.isArray(seats) && seats.length ? seats.join(", ") : "N/A"
-            }</p>
-
-            <p>🎬 Enjoy the show and don’t forget to grab your popcorn!</p>
-          </div>
-          ${
-            primaryImage
-              ? `<img src="${primaryImage}" alt="${title} Poster" style="width: 100%; max-height: 350px; object-fit: cover; border-radius: 4px; margin-top: 16px;" />`
-              : ""
-          }
-
-          <div style="background-color: #f5f5f5; color: #777; padding: 16px; text-align: center; font-size: 14px;">
-            <p style="margin: 0;">Thanks for booking with us!<br>— The TicketShow Team</p>
-            <p style="margin: 4px 0 0;">📍 Visit us: <a href="https://ticketshowapp.vercel.app" style="color: #7b2cbf; text-decoration: none;">TicketShow</a></p>
-          </div>
-        </div>`,
-      });
-
-      console.log(`✅ Booking confirmation mail sent for booking ${bookingId}`);
-    } catch (error) {
-      console.error("❌ Error in sendBookingEmail function:", error);
+    if (showDateTime) {
+      const dt = new Date(showDateTime);
+      showDate = dt.toLocaleDateString("en-US", { timeZone: "Asia/Kolkata" });
+      showTime = dt.toLocaleTimeString("en-US", { timeZone: "Asia/Kolkata" });
     }
+
+    await sendEmail({
+      to: email,
+      subject: `Payment confirmed: '${movieTitle}' booked!`,
+      body: `
+        <h2>Hello ${userName},</h2>
+        <p>Your booking for <b>${movieTitle}</b> is confirmed!</p>
+        <p><b>Date:</b> ${showDate}</p>
+        <p><b>Time:</b> ${showTime}</p>
+        <p><b>Seats:</b> ${seats.join(", ")}</p>
+      `,
+    });
+
+    console.log("✅ Booking email sent:", bookingId);
   }
 );
 
-/* ----------------- NEW MOVIE NOTIFICATION EMAIL -------------- */
+/* ---------------------------------------------------------
+   SEND NEW MOVIE EMAIL — firstname + lastname only
+----------------------------------------------------------- */
 
 const sendNewMovieEmail = inngest.createFunction(
   { id: "send-new-movie-notification" },
   { event: "app/show.added" },
   async ({ event }) => {
-    const { movieId } = event.data;
+    const movie = await Movie.findById(event.data.movieId);
     const users = await User.find({});
-    const movie = await Movie.findById(movieId);
-
-    if (!movie) return "No movie found";
 
     for (const user of users) {
-      if (!user.email) continue;
+      const fullName = buildUserName(user.firstName, user.lastName);
 
-      const userEmail = user.email;
-
-      // ✨ Safe userName for notification email
-      const userName = buildSafeName({
-        firstName: null,
-        lastName: null,
-        username: null,
-        email: userEmail,
-        fallback: user.name,
+      await sendEmail({
+        to: user.email,
+        subject: `New Movie Added: ${movie.originalTitle}`,
+        body: `
+          <h2>Hello ${fullName},</h2>
+          <p>A new movie <b>${movie.originalTitle}</b> is now available on TicketShow!</p>
+        `,
       });
-
-      const subject = `🎬 New Show Added: ${movie.originalTitle}`;
-      const body = `<div style="max-width: 600px; margin: auto; font-family: Arial, sans-serif; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-        <div style="background-color: #7b2cbf; color: white; padding: 20px; text-align: center;">
-            <h1 style="margin: 0;">Hi ${userName},</h1>
-        </div>
-
-        <div style="padding: 24px; color: #333;">
-            <h2 style="margin-top: 0;">"${movie.originalTitle}" is Now Available on TicketShow!</h2>
-            <p><strong>Release Date:</strong> ${movie.releaseDate}</p>
-            <p><strong>Genre:</strong> ${movie.genres?.join(", ")}</p>
-            <p>${movie.description}</p>
-
-            <img src="${movie.primaryImage}" alt="${movie.originalTitle} Poster" style="width: 100%; max-height: 350px; object-fit: cover; border-radius: 4px; margin-top: 16px;" />
-
-            <div style="margin-top: 20px; text-align: center;">
-              <a href="https://ticketshowapp.vercel.app/movies/${movieId}" style="background-color: #7b2cbf; color: white; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold;">🎟️ Book Your Tickets</a>
-            </div>
-        </div>
-
-        <div style="background-color: #f5f5f5; color: #777; padding: 16px; text-align: center; font-size: 14px;">
-            <p style="margin: 0;">Thanks for staying with TicketShow!<br>We bring the cinema to your fingertips.</p>
-            <p style="margin: 4px 0 0;">📍 Visit us: <a href="https://ticketshowapp.vercel.app" style="color: #7b2cbf; text-decoration: none;">TicketShow</a></p>
-        </div>
-      </div>`;
-
-      await sendEmail({ to: userEmail, subject, body });
     }
-
-    return { message: "Notification sent" };
   }
 );
+
+/* ---------------------------------------------------------
+   EXPORT ALL FUNCTIONS
+----------------------------------------------------------- */
 
 export const functions = [
   userCreated,
