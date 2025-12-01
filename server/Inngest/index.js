@@ -8,18 +8,54 @@ import Movie from "../models/Movie.js";
 
 export const inngest = new Inngest({ id: "movie-ticket-booking" });
 
+/* ----------------- HELPER: SAFE NAME BUILDER ----------------- */
+
+const buildSafeName = ({ firstName, lastName, username, email, fallback }) => {
+  let fullName = `${firstName || ""} ${lastName || ""}`.trim();
+
+  if (
+    !fullName ||
+    fullName.toLowerCase() === "null null" ||
+    fullName.toLowerCase() === "null"
+  ) {
+    fullName =
+      username ||
+      (email ? email.split("@")[0] : "") ||
+      fallback ||
+      "Movie Lover";
+  }
+
+  return fullName;
+};
+
 /* ----------------- CLERK USER SYNC FUNCTIONS ----------------- */
 
 const userCreated = inngest.createFunction(
   { id: "create-user" },
   { event: "clerk/user.created" },
   async ({ event }) => {
-    const { id, first_name, last_name, email_addresses, image_url } = event.data;
+    const {
+      id,
+      first_name,
+      last_name,
+      email_addresses,
+      image_url,
+      username,
+    } = event.data;
+
+    const primaryEmail = email_addresses?.[0]?.email_address;
+
+    const fullName = buildSafeName({
+      firstName: first_name,
+      lastName: last_name,
+      username,
+      email: primaryEmail,
+    });
 
     const userdata = {
       _id: id,
-      name: `${first_name || ""} ${last_name || ""}`.trim(),
-      email: email_addresses?.[0]?.email_address,
+      name: fullName,
+      email: primaryEmail,
       image: image_url,
     };
 
@@ -36,12 +72,28 @@ const userUpdated = inngest.createFunction(
   { id: "update-user" },
   { event: "clerk/user.updated" },
   async ({ event }) => {
-    const { id, first_name, last_name, email_addresses, image_url } = event.data;
+    const {
+      id,
+      first_name,
+      last_name,
+      email_addresses,
+      image_url,
+      username,
+    } = event.data;
+
+    const primaryEmail = email_addresses?.[0]?.email_address;
+
+    const fullName = buildSafeName({
+      firstName: first_name,
+      lastName: last_name,
+      username,
+      email: primaryEmail,
+    });
 
     const userdata = {
       _id: id,
-      name: `${first_name || ""} ${last_name || ""}`.trim(),
-      email: email_addresses?.[0]?.email_address,
+      name: fullName,
+      email: primaryEmail,
       image: image_url,
     };
 
@@ -165,16 +217,21 @@ const sendBookingEmail = inngest.createFunction(
               bookingFromDb.email ||
               bookingFromDb.user?.email ||
               null;
-            name = name || bookingFromDb.user?.name || null;
-            seats = seats || bookingFromDb.bookedseats || [];
-            if (bookingFromDb.show?.showDateTime) {
-              showDateTime = showDateTime || bookingFromDb.show.showDateTime;
+            if (!Array.isArray(seats) || !seats.length) {
+              seats = bookingFromDb.bookedseats || [];
+            }
+            if (!showDateTime && bookingFromDb.show?.showDateTime) {
+              showDateTime = bookingFromDb.show.showDateTime;
             }
             if (bookingFromDb.show?.movie) {
               movieTitle =
                 movieTitle || bookingFromDb.show.movie.originalTitle || null;
               primaryImage =
                 primaryImage || bookingFromDb.show.movie.primaryImage || null;
+            }
+            // name fallback from DB user
+            if (!name && bookingFromDb.user) {
+              name = bookingFromDb.user.name;
             }
           }
         }
@@ -187,7 +244,15 @@ const sendBookingEmail = inngest.createFunction(
         return;
       }
 
-      const userName = name || "Movie Lover";
+      // ✨ Smart userName: avoids "NULL NULL", falls back to email username
+      let userName = buildSafeName({
+        firstName: null,
+        lastName: null,
+        username: null,
+        email,
+        fallback: name || bookingFromDb?.user?.name,
+      });
+
       const title = movieTitle || "your movie";
 
       let showTime = "N/A";
@@ -280,7 +345,15 @@ const sendNewMovieEmail = inngest.createFunction(
       if (!user.email) continue;
 
       const userEmail = user.email;
-      const userName = user.name || "Movie Lover";
+
+      // ✨ Safe userName for notification email
+      const userName = buildSafeName({
+        firstName: null,
+        lastName: null,
+        username: null,
+        email: userEmail,
+        fallback: user.name,
+      });
 
       const subject = `🎬 New Show Added: ${movie.originalTitle}`;
       const body = `<div style="max-width: 600px; margin: auto; font-family: Arial, sans-serif; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
