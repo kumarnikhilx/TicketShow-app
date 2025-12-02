@@ -5,19 +5,26 @@ import Movie from "../models/Movie.js";
 
 // get the bookings
 export const getUserbookings = async (req, res) => {
-    try {
-        const user = req.auth().userId;
-        const bookings = await Booking.find({ user }).populate({
-            path: 'show',
-            populate: {
-                path: 'movie'
-            }
-        }).sort({ createdAt: -1 })
-        res.json({ success: true, bookings })
-    } catch (error) {
-        res.json({ success: false, message: error.message });
-    }
-}
+  try {
+    const user = req.auth().userId;
+
+    const bookings = await Booking.find({
+      user,
+      isPaid: true,                // ✅ only successful payments
+    })
+      .populate({
+        path: "show",
+        populate: {
+          path: "movie",
+        },
+      })
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, bookings });
+  } catch (error) {
+    res.json({ success: false, message: error.message });
+  }
+};
 
 // Update user favorites in user metadata
 export const updateUserfavorites = async (req, res) => {

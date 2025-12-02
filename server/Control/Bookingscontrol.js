@@ -85,7 +85,7 @@ export const createBooking = async (req, res) => {
 };
 
 // Verify Razorpay Signature
-// Verify Razorpay Signature
+
 export const verifyPayment = async (req, res) => {
   try {
     const {
